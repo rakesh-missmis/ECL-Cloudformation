@@ -7,18 +7,37 @@ Parameters:
   StackName:
     Type: String
     Description: A unique name for the CloudFormation stack.
-  Tags:
-    Type: String
-    Description: A list of tags in the format 'Name=Application' to apply to the resources created.
+  # EC2InstanceId:
+  #   Description: ID of the EC2 instance to monitor
+  #   Type: AWS::EC2::Instance::Id
 Resources:
+  MyS3Bucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: my-elasticbeanstalk-app-bucket
+      AccessControl: Private
+
   MyElasticBeanstalkApplication:
+    Type: 'AWS::ElasticBeanstalk::Application'
+    Properties:
+      ApplicationName: MyElasticBeanstalkApplication
+  MyElasticBeanstalkEnvironment:
     Type: AWS::ElasticBeanstalk::Environment
     Properties:
-      ApplicationName: !Ref StackName
-      EnvironmentName: !Ref StackName
-      Platform: Python 3.8  # You can change this to your desired platform
-      SolutionStackName: "64bit Amazon Linux 2 v5.5.0 running Python 3.8"
+      ApplicationName: MyElasticBeanstalkApplication
+      EnvironmentName: MyElasticBeanstalkEnvironment
+      SolutionStackName: "64bit Amazon Linux 2 v3.5.7 running Python 3.8"
       OptionSettings:
+        - Namespace: aws:elasticbeanstalk:container:python
+          OptionName: WSGIPath
+          Value: application.py
+        - Namespace: aws:elasticbeanstalk:container:python
+          OptionName: NumProcesses
+          Value: '1'
+        - Namespace: aws:elasticbeanstalk:container:python
+          OptionName: NumThreads
+          Value: '15'
         - Namespace: aws:elasticbeanstalk:environment
           OptionName: EnvironmentType
           Value: LoadBalanced
@@ -26,10 +45,13 @@ Resources:
           OptionName: ServiceRole
           Value: aws-elasticbeanstalk-service-role
         - Namespace: aws:autoscaling:launchconfiguration
-          OptionName: EC2KeyName
-          Value: ecldemo-1  # Replace with your desired EC2 key pair
+          OptionName: IamInstanceProfile
+          Value: aws-elasticbeanstalk-ec2-role
+        # - Namespace: aws:elasticbeanstalk:environment
+        #   OptionName: PlatformArn
+        #   Value: arn:aws:elasticbeanstalk:us-northeast-1::platform/Python 3.8 running on 64bit Amazon Linux 2/5.5.0
       Tags:
-        - Key: Name
+        - Key: name
           Value: !Ref StackName
         - Key: Environment
           Value: !Ref StackName
@@ -38,37 +60,55 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
       Name: MyLoadBalancer
-      Subnets: <subnet-06c95ba1eb4083925,subnet-03061aa0afaa8f0d8>
-      SecurityGroups: <sg-07f20eca5b6b5131f,sg-0f461be130aed64cf>
+      Subnets:
+        - subnet-01195728418f8996a
+      SecurityGroups: 
+        - sg-08a8bbe40d8c36101
       Scheme: internet-facing
       LoadBalancerAttributes:
         - Key: idle_timeout.timeout_seconds
           Value: "60"
-      Tags: Tags
-      Listeners:
-        - Port: 80
-          Protocol: HTTP
-          DefaultActions:
-            - Type: fixed-response
-              FixedResponseConfig:
-                StatusCode: 200
-                ContentType: text/plain
-                Content: OK
+      Tags:
+        - Key: Name
+          Value: !Ref StackName
+      # Listeners:
+      #   - Port: 80
+      #     Protocol: HTTP
+      #     DefaultActions:
+      #       - Type: fixed-response
+      #         FixedResponseConfig:
+      #           StatusCode: 200
+      #           ContentType: text/plain
+      #           Content: OK
+  # MyListener:
+  #   Type: AWS::ElasticLoadBalancingV2::Listener
+  #   Properties:
+  #     DefaultActions:
+  #       - Type: fixed-response
+  #         FixedResponseConfig:
+  #           ContentType: text/plain
+  #           StatusCode: 200
+  #           ContentType: text/plain
+  #           Content: "OK"
+  #     LoadBalancerArn: !Ref MyLoadBalancer
+  #     Port: 80
+  #     Protocol: HTTP
+  
   MyTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
+    Properties: 
       Name: MyTargetGroup
       Port: 80
       Protocol: HTTP
       TargetType: instance
-      VpcId: VPCId
+      VpcId: !Ref VPCId
       HealthCheckIntervalSeconds: 30
       HealthCheckPath: /stress
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 2
       UnhealthyThresholdCount: 2
-  EBListener:
+  MyListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
       DefaultActions:
@@ -76,27 +116,40 @@ Resources:
           FixedResponseConfig:
             StatusCode: 200
             ContentType: text/plain
+            ContentType: text/plain
             Content: OK
-      LoadBalancerArn: MyLoadBalancer
+      LoadBalancerArn: !Ref MyLoadBalancer
       Port: 80
       Protocol: HTTP
-  LaunchConfig:
+
+  MyLaunchConfiguration:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       LaunchConfigurationName: MyLaunchConfiguration
-      ImageId: ami-09318275b68e42715
+      ImageId: ami-0fd8f5842685ca887
       InstanceType: t2.micro
-      SecurityGroups: <sg-07f20eca5b6b5131f,sg-0f461be130aed64cf>
-      KeyName: ecldemo-1
+      SecurityGroups: 
+        - sg-08a8bbe40d8c36101
+      UserData: 
+        Fn::Base64: 
+          !Sub |
+            #!/bin/bash
+            echo "Hello from the user data script!" >> /tmp/userdata_output.txt
+
+      KeyName: aws-login
   MyAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
+      AvailabilityZones: 
+        - us-northeast-1a 
       AutoScalingGroupName: MyAutoScalingGroup
-      LaunchConfigurationName: LaunchConfig
+      LaunchConfigurationName: !Ref MyLaunchConfiguration
       MinSize: 2
       MaxSize: 4
       DesiredCapacity: 2
-      VPCZoneIdentifier: <subnet-06c95ba1eb4083925,subnet-03061aa0afaa8f0d8>
+      VPCZoneIdentifier:
+        - subnet-01195728418f8996a
+       
       Tags:
         - Key: Name
           Value: MyAutoScalingGroup
@@ -112,21 +165,21 @@ Resources:
           NotificationTypes:
             - autoscaling:EC2_INSTANCE_LAUNCH
             - autoscaling:EC2_INSTANCE_TERMINATE
-  MyScaleOutPolicy:
-    Type: AWS::AutoScaling::ScalingPolicy
-    Properties:
-      AdjustmentType: ChangeInCapacity
-      Cooldown: 300
-      ScalingAdjustment: 1
-      AutoScalingGroupName: MyAutoScalingGroup
-  MyScaleInPolicy:
-    Type: AWS::AutoScaling::ScalingPolicy
-    Properties:
-      AdjustmentType: ChangeInCapacity
-      Cooldown: 600
-      ScalingAdjustment: -1
-      AutoScalingGroupName: MyAutoScalingGroup
-      EstimatedInstanceWarmup: 600
+  # MyScaleOutPolicy:
+  #   Type: AWS::AutoScaling::ScalingPolicy
+  #   Properties:
+  #     AdjustmentType: ChangeInCapacity
+  #     Cooldown: 300
+  #     ScalingAdjustment: 1
+  #     AutoScalingGroupName: MyAutoScalingGroup
+  # MyScaleInPolicy:
+  #   Type: AWS::AutoScaling::ScalingPolicy
+  #   Properties:
+  #     AdjustmentType: ChangeInCapacity
+  #     Cooldown: 600
+  #     ScalingAdjustment: -1
+  #     AutoScalingGroupName: MyAutoScalingGroup
+  #     EstimatedInstanceWarmup: 600
   CPUUtilizationAlarmHigh:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -135,14 +188,14 @@ Resources:
       MetricName: CPUUtilization
       Dimensions:
         - Name: AutoScalingGroupName
-          Value: MyAutoScalingGroup
+          Value: !Ref MyAutoScalingGroup
       Statistic: Average
       Period: "300"
       Threshold: "80"
       ComparisonOperator: GreaterThanThreshold
       EvaluationPeriods: "1"
       AlarmActions:
-        - MyScaleOutPolicy
+        - arn:aws:sns:us-northeast-1:421915341614:MySnsTopic
   CPUUtilizationAlarmLow:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -151,11 +204,11 @@ Resources:
       MetricName: CPUUtilization
       Dimensions:
         - Name: AutoScalingGroupName
-          Value: MyAutoScalingGroup
+          Value: !Ref MyAutoScalingGroup
       Statistic: Average
       Period: "600"
       Threshold: "30"
       ComparisonOperator: LessThanThreshold
       EvaluationPeriods: "2"
       AlarmActions:
-        - MyScaleInPolicy
+        - arn:aws:sns:us-northeast-1:421915341614:MySnsTopic
